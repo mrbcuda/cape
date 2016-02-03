@@ -4,14 +4,17 @@
 #' @details Provides time history for S&P cyclically-adjusted P/E
 #' @concepts CAPE, P/E
 #' @seealso http://us.spindices.com/indices/equity/sp-500
+#' @seealso http://www.econ.yale.edu/~shiller/data.htm
 ###########################################################################
-ignore <- lapply(c("ggplot2","scales","tidyr","dplyr","stringr","magrittr","lubridate","EnvStats","directlabels","grid"),
+ignore <- lapply(c("ggplot2","scales","tidyr","dplyr","stringr","lubridate","magrittr","EnvStats","grid"),
                  require,quietly=FALSE,character.only=TRUE)
 options("getSymbols.warning4.0"=FALSE)
 options(digits=4,width=100,scipen=100)
 plot_date = format(Sys.time(), "%b %d, %Y")
+current_year <- year(Sys.time())
 direct_method = "last.bumpup"
-shiller_data = "data/shiller_data.xls" # original unmodified data from Yale
+shiller_url = "http://www.econ.yale.edu/~shiller/data/ie_data.xls" # live source data
+shiller_data = "data/ie_data.xls" # original unmodified data already downloaded
 base_data = "data/base_data.csv" # extracted data massaged to CSV, through 2015
 
 
@@ -60,15 +63,87 @@ emit <- function(p,
   dev.off()
 }
 
+inflection <- function(i) {
+  sprintf("%.0f%%",i*100)
+}
+
+apply_extrema <- function(p,extrema,geometric=TRUE) {
+  p <- p + lapply(extrema$peaks,function(e) {
+    df <- data.frame(edate=e$Date, edist =ifelse(geometric,e$GDist,e$ADist))
+    geom_label(data=df,aes(x=edate,y=edist,label=inflection(edist)),inherit.aes=FALSE,
+               vjust="outward",fill="green",color="black")
+  })
+  p <- p + lapply(extrema$trofs,function(e) {
+    df <- data.frame(edate=e$Date, edist =ifelse(geometric,e$GDist,e$ADist))
+    geom_label(data=df,aes(x=edate,y=edist,label=inflection(edist)),inherit.aes=FALSE,
+               vjust="outward",fill="orange",color="black")
+  })
+  p
+}
+
+apply_current <- function(p,gdf,geometric=TRUE) {
+  nf <- gdf[nrow(gdf),]
+  df <- data.frame(edate=nf$Date,
+                   edist=ifelse(geometric,nf$GDist,nf$ADist))
+  p <- p + geom_label(data=df,aes(x=edate,y=edist,label=inflection(edist)),inherit.aes=FALSE,
+                      vjust="outward",fill="white",color="black")
+}
+
+apply_thresholds <- function(p,x,sd) {
+  tcolor <- "firebrick"
+  p <- p + 
+    geom_hline(yintercept=-1*sd,linetype="dotted",color=tcolor) +
+    geom_hline(yintercept= 0*sd,linetype="dashed", color=tcolor) +
+    geom_hline(yintercept= 1*sd,linetype="dotted",color=tcolor) +
+    geom_hline(yintercept= 2*sd,linetype="dotted",color=tcolor) +
+    geom_hline(yintercept= 3*sd,linetype="dotted",color=tcolor) +
+    annotate(geom="text",x=x,y= 0*sd,color=tcolor,label="mu",parse=TRUE,vjust=1,fontface="bold") +
+    annotate(geom="text",x=x,y=-1*sd,color=tcolor,label="-1*sigma",parse=TRUE,vjust=1) +
+    annotate(geom="text",x=x,y= 1*sd,color=tcolor,label="1*sigma",parse=TRUE,vjust=1) +
+    annotate(geom="text",x=x,y= 2*sd,color=tcolor,label="2*sigma",parse=TRUE,vjust=1) +
+    annotate(geom="text",x=x,y= 3*sd,color=tcolor,label="3*sigma",parse=TRUE,vjust=1)
+  p     
+}
+
+
 # plot the original Shiller data, up to end of 2015
 base.df <- read.csv(base_data)
 base.df$DateString <- sprintf("%s-15-%s",base.df$Month,base.df$Year)
 base.df$Date <- mdy(base.df$DateString)
 
+# compute historical means, arithmetic and geometric
+amean <- mean(base.df$PE10,na.rm=TRUE)
+asd <- sd(base.df$PE10,na.rm=TRUE)
+gmean <- geoMean(base.df$PE10,na.rm=TRUE)
+gsd <- geoSD(base.df$PE10,na.rm=TRUE)
+
+# add distance columns then build peaks and troughs lists
+base.df %<>% na.omit %>% mutate(ADist=(PE10-amean)/amean) %>% mutate(GDist=(PE10-gmean)/gmean)
+
+peak1 <- base.df %>% filter(Year>1900 & Year < 1905) %>% arrange(desc(ADist)) %>% filter(row_number() == 1)
+peak2 <- base.df %>% filter(Year>1925 & Year < 1935) %>% arrange(desc(ADist)) %>% filter(row_number() == 1)
+peak3 <- base.df %>% filter(Year>1962 & Year < 1968) %>% arrange(desc(ADist)) %>% filter(row_number() == 1)
+peak4 <- base.df %>% filter(Year>1998 & Year < 2002) %>% arrange(desc(ADist)) %>% filter(row_number() == 1)
+trof1 <- base.df %>% filter(Year>1920 & Year < 1925) %>% arrange(ADist) %>% filter(row_number() == 1)
+trof2 <- base.df %>% filter(Year>1930 & Year < 1935) %>% arrange(ADist) %>% filter(row_number() == 1)
+trof3 <- base.df %>% filter(Year>1980 & Year < 1985) %>% arrange(ADist) %>% filter(row_number() == 1)
+trof4 <- base.df %>% filter(Year>2006 & Year < 2010) %>% arrange(ADist) %>% filter(row_number() == 1)
+arithmetic_extrema <- list(peaks=list(peak1,peak2,peak3,peak4),trofs=list(trof1,trof2,trof3,trof4))
+
+peak1 <- base.df %>% filter(Year>1900 & Year < 1905) %>% arrange(desc(GDist)) %>% filter(row_number() == 1)
+peak2 <- base.df %>% filter(Year>1925 & Year < 1935) %>% arrange(desc(GDist)) %>% filter(row_number() == 1)
+peak3 <- base.df %>% filter(Year>1962 & Year < 1968) %>% arrange(desc(GDist)) %>% filter(row_number() == 1)
+peak4 <- base.df %>% filter(Year>1998 & Year < 2002) %>% arrange(desc(GDist)) %>% filter(row_number() == 1)
+trof1 <- base.df %>% filter(Year>1920 & Year < 1925) %>% arrange(GDist) %>% filter(row_number() == 1)
+trof2 <- base.df %>% filter(Year>1930 & Year < 1935) %>% arrange(GDist) %>% filter(row_number() == 1)
+trof3 <- base.df %>% filter(Year>1980 & Year < 1985) %>% arrange(GDist) %>% filter(row_number() == 1)
+trof4 <- base.df %>% filter(Year>2006 & Year < 2010) %>% arrange(GDist) %>% filter(row_number() == 1)
+geometric_extrema <- list(peaks=list(peak1,peak2,peak3,peak4),trofs=list(trof1,trof2,trof3,trof4))
+
 # reproduce the Shiller index plots for calibration
-ptitle <- paste("Shiller","PE10","Reproduction",plot_date,sep=' - ')
+ptitle <- paste("S&P Composite Index","Current-Dollar CPI-Adjusted","Shiller Reproduction",plot_date,sep=' - ')
 gdf <- base.df %>% 
-  gather(Plot,Series,RP,RE) %>% 
+  gather(Plot,Series,RP,RE,RD) %>% 
   na.omit
 p <- ggplot(gdf,aes(x=Date,y=Series,color=as.factor(Plot))) +
   geom_line() +
@@ -76,11 +151,26 @@ p <- ggplot(gdf,aes(x=Date,y=Series,color=as.factor(Plot))) +
   facet_grid(Plot~.,scales="free_y",space="fixed",as.table = FALSE) +
   ggtitle(ptitle) +
   guides(color="none") +
-  xlab(NULL) + ylab("Real S&P Composite Index Price (RP $) and Real S&P Composite Earnings (RE $/Share)")
+  xlab(NULL) + ylab("Real Price (RP) | Real Earnings (RE) | Real Dividends (RD)")
 emit(p,"shiller_base_index_reproduction")
 
+# last 3 years
+ptitle <- paste("S&P Composite Index","Current-Dollar CPI-Adjusted","Last 3 Years",plot_date,sep=' - ')
+gdf <- base.df %>% 
+  filter(Year >= (current_year-3)) %>%
+  gather(Plot,Series,RP,RE,RD) %>% 
+  na.omit
+p <- ggplot(gdf,aes(x=Date,y=Series,color=as.factor(Plot))) +
+  geom_line() +
+  scale_y_continuous(breaks=pretty_breaks()) +  # normal direction
+  facet_grid(Plot~.,scales="free_y",space="fixed",as.table = FALSE) +
+  ggtitle(ptitle) +
+  guides(color="none") +
+  xlab(NULL) + ylab("Real Price (RP) | Real Earnings (RE) | Real Dividends (RD)")
+emit(p,"shiller_base_index_l3y")
+
 # reproduce the Shiller CAPE plots for calibration
-ptitle <- paste("Shiller","PE10","Reproduction",plot_date,sep=' - ')
+ptitle <- paste("S&P Composite Index","Shiller Reproduction",plot_date,sep=' - ')
 gdf <- base.df %>% 
   gather(Plot,Series,PE10,GS10) %>% 
   na.omit
@@ -90,8 +180,23 @@ p <- ggplot(gdf,aes(x=Date,y=Series,color=as.factor(Plot))) +
   facet_grid(Plot~.,scales="free_y",space="fixed",as.table = FALSE) +
   ggtitle(ptitle) +
   guides(color="none") +
-  xlab(NULL) + ylab("Price-Earnings Ratio (CAPE, P/E10) and Long-Term Interest Rates (GS10 %)")
+  xlab(NULL) + ylab("Cyclically-Adjusted PE Ratio (CAPE, P/E10) | Long-Term Interest Rates (GS10 %)")
 emit(p,"shiller_base_cape_reproduction")
+
+# last 3 years
+ptitle <- paste("S&P Composite Index","Last 3 Years",plot_date,sep=' - ')
+gdf <- base.df %>% 
+  filter(Year >= (current_year-3)) %>%
+  gather(Plot,Series,PE10,GS10) %>% 
+  na.omit
+p <- ggplot(gdf,aes(x=Date,y=Series,color=as.factor(Plot))) +
+  geom_line() +
+  scale_y_continuous(breaks=pretty_breaks()) +  # normal direction
+  facet_grid(Plot~.,scales="free_y",space="fixed",as.table = FALSE) +
+  ggtitle(ptitle) +
+  guides(color="none") +
+  xlab(NULL) + ylab("Cyclically-Adjusted PE Ratio (CAPE, P/E10) | Long-Term Interest Rates (GS10 %)")
+emit(p,"shiller_base_cape_l3y")
 
 # produce percentile charts
 gdf <- base.df %>% mutate(Range="Normal")
@@ -100,155 +205,65 @@ gdf[with(gdf,is.na(PE10)==FALSE & Year == 1929),'Range'] <- "1929 Crisis"
 gdf[with(gdf,is.na(PE10)==FALSE & Year == 2007),'Range'] <- "2007 Crisis"
 
 wdf <- gdf %>% filter(is.na(PE10)==FALSE) %>% filter(row_number()==n()) %>% mutate(Range="We are here")
-wtext <- sprintf("We are here %d/%d",wdf$Month,wdf$Year)
-# gdf <- bind_rows(gdf,wdf) %>% arrange(Year,Month)
-# rm(wdf)
+wtext <- sprintf("We are here %d/%d = %0.1f",wdf$Month,wdf$Year,wdf$PE10)
 
+# historical percentiles
 ptitle <- paste("Shiller","PE10","Historical Percentile",plot_date,sep=' - ')
 p <- ggplot(gdf,aes(x=PE10)) +
   stat_ecdf(geom="point",na.rm=TRUE,color="blue") +
   scale_x_continuous(breaks=pretty_breaks()) +
   scale_y_continuous(labels = percent_format()) +
   coord_flip() + 
-  ggtitle(ptitle) +
-  ylab("Percentile") + 
-  xlab("Price-Earnings Ratio (CAPE, P/E10)") +
-  annotate("text",x=wdf$PE10,y=0.5,color="black",label=wtext,vjust=0,hjust=0) +
-  geom_vline(xintercept=wdf$PE10,color="darkgray",linetype="dashed")
+  labs(title=ptitle,y="Percentile",x="Price-Earnings Ratio (CAPE, P/E10)") +
+  geom_vline(xintercept=wdf$PE10,color="darkgray",linetype="dashed") +
+  annotate("label",x=wdf$PE10,y=0.5,fill="white",color="black",label=wtext,vjust="middle",hjust="center")
 emit(p,"shiller_base_cape_percentile_total")
 
-# percentiles by episode
+# historical percentiles by episode
 ptitle <- paste("Shiller","PE10","Historical Episode Percentile",plot_date,sep=' - ')
 p <- ggplot(gdf,aes(x=PE10,color=Range)) +
   stat_ecdf(na.rm=TRUE) +
   scale_x_continuous(breaks=pretty_breaks()) +
   scale_y_continuous(labels = percent_format()) +
   coord_flip() + 
-  ggtitle(ptitle) +
-  ylab("Percentile") + 
-  xlab("Price-Earnings Ratio (CAPE, P/E10)") +
-  annotate("text",x=wdf$PE10,y=0.5,color="black",label=wtext,vjust=0,hjust=0) +
-  geom_vline(xintercept=wdf$PE10,color="darkgray",linetype="dashed")
+  labs(title=ptitle,y="Percentile",x="Price-Earnings Ratio (CAPE, P/E10)") +
+  geom_vline(xintercept=wdf$PE10,color="darkgray",linetype="dashed") +
+  annotate("label",x=wdf$PE10,y=0.5,fill="white",color="black",label=wtext,vjust="middle",hjust="center",alpha=0.5)
 emit(p,"shiller_base_cape_percentile_episodes")
 
-# historical means
-amean <- mean(base.df$PE10,na.rm=TRUE)
-asd <- sd(base.df$PE10,na.rm=TRUE)
-gmean <- geoMean(base.df$PE10,na.rm=TRUE)
-gsd <- geoSD(base.df$PE10,na.rm=TRUE)
-
-
-base.df %<>% na.omit %>% mutate(ADist=(PE10-amean)/amean) %>% mutate(GDist=(PE10-gmean)/gmean)
-gdf <- base.df
-
-inflection <- function(i) {
-  sprintf("%.0f%%",i*100)
-}
-
+# deviation from arithmetic mean
 ptitle <- paste("Shiller","PE10","Deviation from Arithmetic Mean",plot_date,sep=' - ')
-asd_dist <- asd / amean
-peak1 <- gdf %>% filter(Year>1900 & Year < 1905) %>% arrange(desc(ADist)) %>% filter(row_number() == 1)
-peak2 <- gdf %>% filter(Year>1925 & Year < 1935) %>% arrange(desc(ADist)) %>% filter(row_number() == 1)
-peak3 <- gdf %>% filter(Year>1962 & Year < 1968) %>% arrange(desc(ADist)) %>% filter(row_number() == 1)
-peak4 <- gdf %>% filter(Year>1998 & Year < 2002) %>% arrange(desc(ADist)) %>% filter(row_number() == 1)
-trof1 <- gdf %>% filter(Year>1920 & Year < 1925) %>% arrange(ADist) %>% filter(row_number() == 1)
-trof2 <- gdf %>% filter(Year>1930 & Year < 1935) %>% arrange(ADist) %>% filter(row_number() == 1)
-trof3 <- gdf %>% filter(Year>1980 & Year < 1985) %>% arrange(ADist) %>% filter(row_number() == 1)
-trof4 <- gdf %>% filter(Year>2006 & Year < 2010) %>% arrange(ADist) %>% filter(row_number() == 1)
-
 p <- ggplot(gdf,aes(x=Date,y=ADist)) +
   geom_line(color="blue") +
   scale_y_continuous(labels=percent_format(),breaks=pretty_breaks()) +
-  ggtitle(ptitle) +
-  geom_hline(yintercept=-1*asd_dist,linetype="dashed",color="red") +
-  geom_hline(yintercept= 0*asd_dist,linetype="solid",color="red") +
-  geom_hline(yintercept= 1*asd_dist,linetype="dashed",color="red") +
-  geom_hline(yintercept= 2*asd_dist,linetype="dashed",color="red") +
-  geom_hline(yintercept= 3*asd_dist,linetype="dashed",color="red") +
-  annotate(geom="text",x=gdf[1,'Date'],y=-1*asd_dist,color="red",label="-1SD",vjust=1) +
-  annotate(geom="text",x=gdf[1,'Date'],y= 0*asd_dist,color="red",label="Mean",vjust=1) +
-  annotate(geom="text",x=gdf[1,'Date'],y= 1*asd_dist,color="red",label="+1SD",vjust=1) +
-  annotate(geom="text",x=gdf[1,'Date'],y= 2*asd_dist,color="red",label="+2SD",vjust=1) +
-  annotate(geom="text",x=gdf[1,'Date'],y= 3*asd_dist,color="red",label="+3SD",vjust=1) +
-  annotate(geom="text",x=peak1$Date,y=peak1$ADist,vjust=-1,color="green",label=inflection(peak1$ADist)) +
-  annotate(geom="text",x=peak2$Date,y=peak2$ADist,vjust=-1,color="green",label=inflection(peak2$ADist)) +
-  annotate(geom="text",x=peak3$Date,y=peak3$ADist,vjust=-1,color="green",label=inflection(peak3$ADist)) +
-  annotate(geom="text",x=peak4$Date,y=peak4$ADist,vjust=-1,color="green",label=inflection(peak4$ADist)) +
-  annotate(geom="text",x=trof1$Date,y=trof1$ADist,vjust=2,color="orange",label=inflection(trof1$ADist)) +
-  annotate(geom="text",x=trof2$Date,y=trof2$ADist,vjust=2,color="orange",label=inflection(trof2$ADist)) +
-  annotate(geom="text",x=trof3$Date,y=trof3$ADist,vjust=2,color="orange",label=inflection(trof3$ADist)) +
-  annotate(geom="text",x=trof4$Date,y=trof4$ADist,vjust=2,color="orange",label=inflection(trof4$ADist)) +
-  annotate(geom="text",x=gdf[nrow(gdf),'Date'],y=gdf[nrow(gdf),'ADist'],
-           vjust=ifelse(gdf[nrow(gdf),'ADist']>0,-1,2),color="black",label=inflection(gdf[nrow(gdf),'ADist'])) +
-  xlab(NULL) + ylab("Deviation from PE10 Arithmetic Mean (%)")
+  labs(title=ptitle,x=NULL,y="Deviation from PE10 Arithmetic Mean (%)")
+p <- apply_thresholds(p,gdf[1,'Date'],asd/amean)
+p <- apply_current(p,gdf,geometric = FALSE)
+p <- apply_extrema(p,arithmetic_extrema,geometric = FALSE)
 emit(p,"pe10_deviation_arithmetic")
 
+# deviation from geometric mean
 # this version is correct because it computes the proper geometric SD
 ptitle <- paste("Shiller","PE10","Deviation from Geometric Mean",plot_date,sep=' - ')
-gsd_dist <- gsd / gmean
-peak1 <- gdf %>% filter(Year>1900 & Year < 1905) %>% arrange(desc(GDist)) %>% filter(row_number() == 1)
-peak2 <- gdf %>% filter(Year>1925 & Year < 1935) %>% arrange(desc(GDist)) %>% filter(row_number() == 1)
-peak3 <- gdf %>% filter(Year>1962 & Year < 1968) %>% arrange(desc(GDist)) %>% filter(row_number() == 1)
-peak4 <- gdf %>% filter(Year>1998 & Year < 2002) %>% arrange(desc(GDist)) %>% filter(row_number() == 1)
-trof1 <- gdf %>% filter(Year>1920 & Year < 1925) %>% arrange(GDist) %>% filter(row_number() == 1)
-trof2 <- gdf %>% filter(Year>1930 & Year < 1935) %>% arrange(GDist) %>% filter(row_number() == 1)
-trof3 <- gdf %>% filter(Year>1980 & Year < 1985) %>% arrange(GDist) %>% filter(row_number() == 1)
-trof4 <- gdf %>% filter(Year>2006 & Year < 2010) %>% arrange(GDist) %>% filter(row_number() == 1)
 p <- ggplot(gdf,aes(x=Date,y=GDist)) +
   geom_line(color="blue") +
   scale_y_continuous(labels=percent_format(),breaks=pretty_breaks()) +
-  ggtitle(ptitle) +
-  geom_hline(yintercept=-1*gsd_dist,linetype="dashed",color="red") +
-  geom_hline(yintercept= 0*gsd_dist,linetype="solid",color="red") +
-  geom_hline(yintercept= 1*gsd_dist,linetype="dashed",color="red") +
-  geom_hline(yintercept= 2*gsd_dist,linetype="dashed",color="red") +
-  geom_hline(yintercept= 3*gsd_dist,linetype="dashed",color="red") +
-  annotate(geom="text",x=gdf[1,'Date'],y=-1*gsd_dist,color="red",label="-1SD",vjust=1) +
-  annotate(geom="text",x=gdf[1,'Date'],y= 0*gsd_dist,color="red",label="Mean",vjust=1) +
-  annotate(geom="text",x=gdf[1,'Date'],y= 1*gsd_dist,color="red",label="+1SD",vjust=1) +
-  annotate(geom="text",x=gdf[1,'Date'],y= 2*gsd_dist,color="red",label="+2SD",vjust=1) +
-  annotate(geom="text",x=gdf[1,'Date'],y= 3*gsd_dist,color="red",label="+3SD",vjust=1) +
-  annotate(geom="text",x=peak1$Date,y=peak1$GDist,vjust=-1,color="green",label=inflection(peak1$GDist)) +
-  annotate(geom="text",x=peak2$Date,y=peak2$GDist,vjust=-1,color="green",label=inflection(peak2$GDist)) +
-  annotate(geom="text",x=peak3$Date,y=peak3$GDist,vjust=-1,color="green",label=inflection(peak3$GDist)) +
-  annotate(geom="text",x=peak4$Date,y=peak4$GDist,vjust=-1,color="green",label=inflection(peak4$GDist)) +
-  annotate(geom="text",x=trof1$Date,y=trof1$GDist,vjust=2,color="orange",label=inflection(trof1$GDist)) +
-  annotate(geom="text",x=trof2$Date,y=trof2$GDist,vjust=2,color="orange",label=inflection(trof2$GDist)) +
-  annotate(geom="text",x=trof3$Date,y=trof3$GDist,vjust=2,color="orange",label=inflection(trof3$GDist)) +
-  annotate(geom="text",x=trof4$Date,y=trof4$GDist,vjust=2,color="orange",label=inflection(trof4$GDist)) +
-  annotate(geom="text",x=gdf[nrow(gdf),'Date'],y=gdf[nrow(gdf),'GDist'],
-           vjust=ifelse(gdf[nrow(gdf),'GDist']>0,-1,2),color="black",label=inflection(gdf[nrow(gdf),'GDist'])) +
-  xlab(NULL) + ylab("Deviation from PE10 Geometric Mean (%)")
+  labs(title=ptitle,x=NULL,y="Deviation from PE10 Geometric Mean (%)")
+p <- apply_thresholds(p,gdf[1,'Date'],gsd/gmean)
+p <- apply_current(p,gdf)
+p <- apply_extrema(p,geometric_extrema)
 emit(p,"pe10_deviation_geometric")
 
+# deviation from geometric mean
 # this version is bogus because it portrays the improper geometric SD distance using the arithmetic SD
-gsd_dist <- asd / gmean
 ptitle <- paste("Shiller","PE10","Deviation from Geometric Mean (Repro)",plot_date,sep=' - ')
 p <- ggplot(gdf,aes(x=Date,y=GDist)) +
   geom_line(color="blue") +
   scale_y_continuous(labels=percent_format(),breaks=pretty_breaks()) +
-  ggtitle(ptitle) +
-  geom_hline(yintercept=-1*gsd_dist,linetype="dashed",color="red") +
-  geom_hline(yintercept= 0*gsd_dist,linetype="solid",color="red") +
-  geom_hline(yintercept= 1*gsd_dist,linetype="dashed",color="red") +
-  geom_hline(yintercept= 2*gsd_dist,linetype="dashed",color="red") +
-  geom_hline(yintercept= 3*gsd_dist,linetype="dashed",color="red") +
-  annotate(geom="text",x=gdf[1,'Date'],y=-1*gsd_dist,color="red",label="-1SD",vjust=1) +
-  annotate(geom="text",x=gdf[1,'Date'],y= 0*gsd_dist,color="red",label="Mean",vjust=1) +
-  annotate(geom="text",x=gdf[1,'Date'],y= 1*gsd_dist,color="red",label="+1SD",vjust=1) +
-  annotate(geom="text",x=gdf[1,'Date'],y= 2*gsd_dist,color="red",label="+2SD",vjust=1) +
-  annotate(geom="text",x=gdf[1,'Date'],y= 3*gsd_dist,color="red",label="+3SD",vjust=1) +
-  annotate(geom="text",x=peak1$Date,y=peak1$GDist,vjust=-1,color="green",label=inflection(peak1$GDist)) +
-  annotate(geom="text",x=peak2$Date,y=peak2$GDist,vjust=-1,color="green",label=inflection(peak2$GDist)) +
-  annotate(geom="text",x=peak3$Date,y=peak3$GDist,vjust=-1,color="green",label=inflection(peak3$GDist)) +
-  annotate(geom="text",x=peak4$Date,y=peak4$GDist,vjust=-1,color="green",label=inflection(peak4$GDist)) +
-  annotate(geom="text",x=trof1$Date,y=trof1$GDist,vjust=2,color="orange",label=inflection(trof1$GDist)) +
-  annotate(geom="text",x=trof2$Date,y=trof2$GDist,vjust=2,color="orange",label=inflection(trof2$GDist)) +
-  annotate(geom="text",x=trof3$Date,y=trof3$GDist,vjust=2,color="orange",label=inflection(trof3$GDist)) +
-  annotate(geom="text",x=trof4$Date,y=trof4$GDist,vjust=2,color="orange",label=inflection(trof4$GDist)) +
-  annotate(geom="text",x=gdf[nrow(gdf),'Date'],y=gdf[nrow(gdf),'GDist'],
-           vjust=ifelse(gdf[nrow(gdf),'GDist']>0,-1,2),color="black",label=inflection(gdf[nrow(gdf),'GDist'])) +
-  xlab(NULL) + ylab("Deviation from PE10 Geometric Mean (%)")
+  labs(title=ptitle,x=NULL,y="Deviation from PE10 Geometric Mean (Arithmetic Deviation %)")
+p <- apply_thresholds(p,gdf[1,'Date'],asd/gmean)
+p <- apply_current(p,gdf)
+p <- apply_extrema(p,geometric_extrema)
 emit(p,"pe10_deviation_geometric_repro")
 
-
+# < end >
