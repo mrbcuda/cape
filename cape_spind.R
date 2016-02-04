@@ -105,7 +105,7 @@ apply_thresholds <- function(p,x,sd) {
 
 # plot the original S&P data
 # one date doesn't sync with quarter ends so tweak it
-base.df <- read.csv(base_data,colClasses=c("character",rep("numeric",7),"factor"))
+base.df <- read.csv(base_data,colClasses=c("character",rep("numeric",11),"factor"))
 base.df$date <- as.Date(base.df$Date,format="%m/%d/%Y")
 base.df <- base.df %>% select(-Date) %>% rename(Date=date)
 tbr <- which(base.df$Date=="2011/03/30")
@@ -113,24 +113,35 @@ if ( tbr > 0)
   base.df[tbr,'Date'] <- "2011/03/31"
 
 # FRED data pull
-# CPI seasonal CPIAUCSL
-ignore <- getSymbols("CPIAUCSL",src="FRED")
+# CPI seasonal CPIAUCSL, GS10 ten-year UST
+ignore <- getSymbols(c("CPIAUCSL","GS10"),src="FRED")
 CPIAUCSL <- CPIAUCSL["1988/",] # earliest S&P data start
+GS10 <- GS10["1988/",]
 cpi.df <- data.frame(Date=index(CPIAUCSL),CPI=coredata(CPIAUCSL)[,1])
 cpi.df$Quarter <- as.Date(as.yearqtr(cpi.df$Date)) - 1
-cpi.df <- cpi.df %>% group_by(Quarter) %>% filter(row_number(CPI)==1)
+cpi.df <- cpi.df %>% group_by(Quarter) %>% filter(row_number(Quarter)==1)
 cpi.df <- cpi.df %>% select(CPI,Quarter) %>% rename(Date=Quarter)
 cpi.now <- as.numeric(cpi.df[nrow(cpi.df),1])
 
-# merge CPI into base
+gs10.df <- data.frame(Date=index(GS10),GS10=coredata(GS10)[,1])
+gs10.df$Quarter <- as.Date(as.yearqtr(gs10.df$Date)) - 1
+gs10.df <- gs10.df %>% group_by(Quarter) %>% filter(row_number(Quarter)==1)
+gs10.df <- gs10.df %>% select(GS10,Quarter) %>% rename(Date=Quarter)
+
+# merge CPI and GS10 into base
 base.df <- left_join(base.df,cpi.df,by="Date")
-base.df <- base.df %>% 
+base.df <- left_join(base.df,gs10.df,by="Date")
+base.df <- base.df %>%
   arrange(Date) %>%
   mutate(Year=year(Date)) %>%
   mutate(Month=month(Date)) %>%
   mutate(CPIS=CPI/cpi.now) %>% 
   mutate(RP=Price*CPIS) %>% 
   mutate(RE=Rep.Earnings*CPIS) %>%
+  mutate(RDPS=DPS*CPIS) %>%
+  mutate(RSPS=SPS*CPIS) %>% 
+  mutate(RBVPS=BVPS*CPIS) %>%
+  mutate(RCXPS=CXPS*CPIS) %>%
   mutate(RE10=roll_sum(RE,40,align="right",fill=NA)/40) %>%
   mutate(PE10=RP/RE10)
 
@@ -143,32 +154,18 @@ gsd <- geoSD(base.df$PE10,na.rm=TRUE)
 # add distance columns then build peaks and troughs lists
 base.df %<>% mutate(ADist=(PE10-amean)/amean) %>% mutate(GDist=(PE10-gmean)/gmean)
 
-#peak1 <- base.df %>% filter(Year>1900 & Year < 1905) %>% arrange(desc(ADist)) %>% filter(row_number() == 1)
-#peak2 <- base.df %>% filter(Year>1925 & Year < 1935) %>% arrange(desc(ADist)) %>% filter(row_number() == 1)
-#peak3 <- base.df %>% filter(Year>1962 & Year < 1968) %>% arrange(desc(ADist)) %>% filter(row_number() == 1)
 peak4 <- base.df %>% filter(Year>1998 & Year < 2002) %>% arrange(desc(ADist)) %>% filter(row_number() == 1)
-#trof1 <- base.df %>% filter(Year>1920 & Year < 1925) %>% arrange(ADist) %>% filter(row_number() == 1)
-#trof2 <- base.df %>% filter(Year>1930 & Year < 1935) %>% arrange(ADist) %>% filter(row_number() == 1)
-#trof3 <- base.df %>% filter(Year>1980 & Year < 1985) %>% arrange(ADist) %>% filter(row_number() == 1)
 trof4 <- base.df %>% filter(Year>2006 & Year < 2010) %>% arrange(ADist) %>% filter(row_number() == 1)
-arithmetic_extrema <- list(peaks=list(peak4),
-                           trofs=list(trof4))
+arithmetic_extrema <- list(peaks=list(peak4),trofs=list(trof4))
 
-#peak1 <- base.df %>% filter(Year>1900 & Year < 1905) %>% arrange(desc(GDist)) %>% filter(row_number() == 1)
-#peak2 <- base.df %>% filter(Year>1925 & Year < 1935) %>% arrange(desc(GDist)) %>% filter(row_number() == 1)
-#peak3 <- base.df %>% filter(Year>1962 & Year < 1968) %>% arrange(desc(GDist)) %>% filter(row_number() == 1)
 peak4 <- base.df %>% filter(Year>1998 & Year < 2002) %>% arrange(desc(GDist)) %>% filter(row_number() == 1)
-#trof1 <- base.df %>% filter(Year>1920 & Year < 1925) %>% arrange(GDist) %>% filter(row_number() == 1)
-#trof2 <- base.df %>% filter(Year>1930 & Year < 1935) %>% arrange(GDist) %>% filter(row_number() == 1)
-#trof3 <- base.df %>% filter(Year>1980 & Year < 1985) %>% arrange(GDist) %>% filter(row_number() == 1)
 trof4 <- base.df %>% filter(Year>2006 & Year < 2010) %>% arrange(GDist) %>% filter(row_number() == 1)
-geometric_extrema <- list(peaks=list(peak4),
-                          trofs=list(trof4))
+geometric_extrema <- list(peaks=list(peak4),trofs=list(trof4))
 
 # reproduce the Shiller index plots for calibration
 ptitle <- paste("S&P Composite Index","Current-Dollar CPI-Adjusted","S&P Index Restatement",plot_date,sep=' - ')
 gdf <- base.df %>% 
-  gather(Plot,Series,RP,RE) %>% 
+  gather(Plot,Series,RP,RE,RDPS) %>% 
   na.omit
 p <- ggplot(gdf,aes(x=Date,y=Series,color=as.factor(Plot))) +
   geom_line() +
@@ -176,14 +173,14 @@ p <- ggplot(gdf,aes(x=Date,y=Series,color=as.factor(Plot))) +
   facet_grid(Plot~.,scales="free_y",space="fixed",as.table = FALSE) +
   ggtitle(ptitle) +
   guides(color="none") +
-  xlab(NULL) + ylab("Real Price (RP) | Real Earnings (RE)")
+  xlab(NULL) + ylab("Real Price (RP) | Real Earnings (RE) | Real Dividends Per Share (RDPS)")
 emit(p,"spi_base_index_restatement")
 
 # last 3 years
 ptitle <- paste("S&P Composite Index","Current-Dollar CPI-Adjusted","Last 3 Years",plot_date,sep=' - ')
 gdf <- base.df %>% 
   filter(Year >= (current_year-3)) %>%
-  gather(Plot,Series,RP,RE) %>% 
+  gather(Plot,Series,RP,RE,RDPS) %>% 
   na.omit
 p <- ggplot(gdf,aes(x=Date,y=Series,color=as.factor(Plot))) +
   geom_line() +
@@ -191,42 +188,56 @@ p <- ggplot(gdf,aes(x=Date,y=Series,color=as.factor(Plot))) +
   facet_grid(Plot~.,scales="free_y",space="fixed",as.table = FALSE) +
   ggtitle(ptitle) +
   guides(color="none") +
-  xlab(NULL) + ylab("Real Price (RP) | Real Earnings (RE)")
+  xlab(NULL) + ylab("Real Price (RP) | Real Earnings (RE) | Real Dividends Per Share (RDPS)")
 emit(p,"spi_base_index_l3y")
 
+# plot the extra per share data from S&P
+ptitle <- paste("S&P Composite Index","Then-Year-Dollar","S&P Metrics Per Share",plot_date,sep=' - ')
+gdf <- base.df %>% 
+  gather(Plot,Series,DPS,SPS,BVPS,CXPS) %>% 
+  na.omit
+p <- ggplot(gdf,aes(x=Date,y=Series,color=as.factor(Plot))) +
+  geom_line() +
+  scale_y_continuous(breaks=pretty_breaks()) +  # normal direction
+  facet_grid(Plot~.,scales="free_y",space="fixed",as.table = FALSE) +
+  ggtitle(ptitle) +
+  guides(color="none") +
+  xlab(NULL) + ylab("Dividends (DPS) | Sales (SPS) | Book Value (BVPS) | Capex (CXPS) ($/share)")
+emit(p,"spi_extra_index_restatement")
+
+
 # reproduce the Shiller CAPE plots for calibration
-# ptitle <- paste("S&P Composite Index","S&P Restatement",plot_date,sep=' - ')
-# gdf <- base.df %>% 
-#   gather(Plot,Series,PE10,GS10) %>% 
-#   na.omit
-# p <- ggplot(gdf,aes(x=Date,y=Series,color=as.factor(Plot))) +
-#   geom_line() +
-#   scale_y_continuous(breaks=pretty_breaks()) +  # normal direction
-#   facet_grid(Plot~.,scales="free_y",space="fixed",as.table = FALSE) +
-#   ggtitle(ptitle) +
-#   guides(color="none") +
-#   xlab(NULL) + ylab("Cyclically-Adjusted PE Ratio (CAPE, P/E10) | Long-Term Interest Rates (GS10 %)")
-# emit(p,"shiller_base_cape_reproduction")
+ptitle <- paste("S&P Composite Index","S&P Restatement",plot_date,sep=' - ')
+gdf <- base.df %>% 
+  gather(Plot,Series,PE10,GS10) %>% 
+  na.omit
+p <- ggplot(gdf,aes(x=Date,y=Series,color=as.factor(Plot))) +
+  geom_line() +
+  scale_y_continuous(breaks=pretty_breaks()) +  # normal direction
+  facet_grid(Plot~.,scales="free_y",space="fixed",as.table = FALSE) +
+  ggtitle(ptitle) +
+  guides(color="none") +
+  xlab(NULL) + ylab("Cyclically-Adjusted PE Ratio (CAPE, P/E10) | Long-Term Interest Rates (GS10 %)")
+emit(p,"spi_base_cape_reproduction")
 
 # last 3 years
-# ptitle <- paste("S&P Composite Index","Last 3 Years",plot_date,sep=' - ')
-# gdf <- base.df %>% 
-#   filter(Year >= (current_year-3)) %>%
-#   gather(Plot,Series,PE10,GS10) %>% 
-#   na.omit
-# p <- ggplot(gdf,aes(x=Date,y=Series,color=as.factor(Plot))) +
-#   geom_line() +
-#   scale_y_continuous(breaks=pretty_breaks()) +  # normal direction
-#   facet_grid(Plot~.,scales="free_y",space="fixed",as.table = FALSE) +
-#   ggtitle(ptitle) +
-#   guides(color="none") +
-#   xlab(NULL) + ylab("Cyclically-Adjusted PE Ratio (CAPE, P/E10) | Long-Term Interest Rates (GS10 %)")
-# emit(p,"shiller_base_cape_l3y")
+ptitle <- paste("S&P Composite Index","Last 3 Years",plot_date,sep=' - ')
+gdf <- base.df %>% 
+  filter(Year >= (current_year-3)) %>%
+  gather(Plot,Series,PE10,GS10) %>% 
+  na.omit
+p <- ggplot(gdf,aes(x=Date,y=Series,color=as.factor(Plot))) +
+  geom_line() +
+  scale_y_continuous(breaks=pretty_breaks()) +  # normal direction
+  facet_grid(Plot~.,scales="free_y",space="fixed",as.table = FALSE) +
+  ggtitle(ptitle) +
+  guides(color="none") +
+  xlab(NULL) + ylab("Cyclically-Adjusted PE Ratio (CAPE, P/E10) | Long-Term Interest Rates (GS10 %)")
+emit(p,"spi_base_cape_l3y")
 
 # produce percentile charts
 gdf <- base.df %>% mutate(Range="Normal")
 gdf[with(gdf,is.na(PE10)==FALSE & PE10>30 & Year > 1995 & Year < 2005),'Range'] <- "Tech Bubble"
-#gdf[with(gdf,is.na(PE10)==FALSE & Year == 1929),'Range'] <- "1929 Crisis"
 gdf[with(gdf,is.na(PE10)==FALSE & Year == 2007),'Range'] <- "2007 Crisis"
 
 wdf <- gdf %>% filter(is.na(PE10)==FALSE) %>% filter(row_number()==n()) %>% mutate(Range="We are here")
@@ -258,7 +269,7 @@ emit(p,"spi_base_cape_percentile_episodes")
 
 # deviation from arithmetic mean
 ptitle <- paste("S&P Indices","PE10","Deviation from Arithmetic Mean",plot_date,sep=' - ')
-gdf %<>% filter(Type=="Actual") %>% na.omit
+gdf <- base.df %>% filter(Type=="Actual") %>% select(Date,ADist) %>% na.omit
 p <- ggplot(gdf,aes(x=Date,y=ADist)) +
   geom_line(color="blue") +
   scale_y_continuous(labels=percent_format(),breaks=pretty_breaks()) +
@@ -271,6 +282,7 @@ emit(p,"pe10_deviation_arithmetic")
 # deviation from geometric mean
 # this version is correct because it computes the proper geometric SD
 ptitle <- paste("S&P Indices","PE10","Deviation from Geometric Mean",plot_date,sep=' - ')
+gdf <- base.df %>% filter(Type=="Actual") %>% select(Date,GDist) %>% na.omit
 p <- ggplot(gdf,aes(x=Date,y=GDist)) +
   geom_line(color="blue") +
   scale_y_continuous(labels=percent_format(),breaks=pretty_breaks()) +
@@ -283,6 +295,7 @@ emit(p,"pe10_deviation_geometric")
 # deviation from geometric mean
 # this version is bogus because it portrays the improper geometric SD distance using the arithmetic SD
 ptitle <- paste("S&P Indices","PE10","Deviation from Geometric Mean (Repro)",plot_date,sep=' - ')
+gdf <- base.df %>% filter(Type=="Actual") %>% select(Date,GDist) %>% na.omit
 p <- ggplot(gdf,aes(x=Date,y=GDist)) +
   geom_line(color="blue") +
   scale_y_continuous(labels=percent_format(),breaks=pretty_breaks()) +
@@ -293,16 +306,12 @@ p <- apply_extrema(p,geometric_extrema)
 emit(p,"pe10_deviation_geometric_repro")
 
 # show the expected earnings
-ptitle <- paste("S&P Indices","Reported Earnings",
-                "Expected Earnings", plot_date,sep=' - ')
-p <- ggplot(base.df,aes(x=Date,y=Rep.Earnings,color=Type)) +
+ptitle <- paste("S&P Indices","Reported Earnings","Expected Earnings", plot_date,sep=' - ')
+p <- ggplot(base.df %>% select(Date,Type,Rep.Earnings) %>% na.omit,aes(x=Date,y=Rep.Earnings,color=Type)) +
   geom_line() +
   scale_y_continuous(labels=dollar_format(),breaks=pretty_breaks()) +
   labs(title=ptitle,x=NULL,y="Reported (Then-Year $) and Expected Earnings ($)")
 emit(p,"spi_expected_earnings")
-
-# TODO add dividends from the spreadsheet
-# add real dividends calculation, recover its facet plot
 
 # TODO add sector equivalents from the spreadsheets
 # < end >
