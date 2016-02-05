@@ -104,9 +104,20 @@ spx <- base.df %>%
   filter(EPS %in% 'Reported') %>%
   gather(Quarter,Value,contains("Q")) %>% 
   mutate(Date=as.Date(as.yearqtr(Quarter))) %>%
+  mutate(QOQ=NA)
+
+# build QOQ series
+smini <- data.frame()
+for ( i in unique(spx$Index)) {
+  smini <- bind_rows(smini,spx %>% filter(Index==i) %>% mutate(QOQ=Value/lag(Value)-1))
+}
+
+spx <- smini %>%
   mutate(Index=sprintf("S&P-%d",Index)) %>%
   mutate(Index=factor(Index))
+smini <- NULL
 
+# absolute values
 ptitle <- paste("S&P Indices","Reported Earnings","Composite Indices",plot_date,sep=' - ')
 p <- ggplot(spx %>% na.omit,aes(x=Date,y=Value,color=Index)) +
   geom_line() +
@@ -115,14 +126,34 @@ p <- ggplot(spx %>% na.omit,aes(x=Date,y=Value,color=Index)) +
   xlab(NULL) + ylab("Quarterly Earnings per Share (EPS)")
 emit(p,"all_index_eps")
 
+# quarter-over-quarter
+ptitle <- paste("S&P Indices","Reported Earnings QOQ","Composite Indices",plot_date,sep=' - ')
+p <- ggplot(spx %>% filter(year(Date)>2009) %>% na.omit,aes(x=Date,y=QOQ,color=Index)) +
+  geom_line() +
+  scale_y_continuous(labels=percent_format(),breaks=pretty_breaks()) +
+  geom_hline(yintercept=0,color="gray",linetype="dashed") +
+  ggtitle(ptitle) +
+  xlab(NULL) + ylab("Quarterly Earnings per Share Change Q-O-Q (%)")
+emit(p,"all_index_eps_qoq")
+
+
 # finish with individual sectors
 spsec <- base.df %>% 
   filter(Sector %nin% "Index") %>% 
   filter(EPS %in% 'Reported') %>%
   gather(Quarter,Value,contains("Q")) %>% 
-  mutate(Date=as.Date(as.yearqtr(Quarter))) %>%
+  mutate(Date=as.Date(as.yearqtr(Quarter)))
+
+# build QOQ series
+smini <- data.frame()
+for ( i in unique(spsec$Sector)) {
+  smini <- bind_rows(smini,spsec %>% filter(Sector %in% i) %>% mutate(QOQ=Value/lag(Value)-1))
+}
+
+spsec <- smini %>%
   mutate(Index=sprintf("S&P-%d",Index)) %>%
   mutate(Index=factor(Index))
+smini <- NULL
 
 ptitle <- paste("S&P Indices","Reported Earnings","Sector Data",plot_date,sep=' - ')
 p <- ggplot(spsec %>% na.omit,aes(x=Date,y=Value,color=Index)) +
@@ -132,5 +163,29 @@ p <- ggplot(spsec %>% na.omit,aes(x=Date,y=Value,color=Index)) +
   ggtitle(ptitle) +
   xlab(NULL) + ylab("Quarterly Earnings per Share (EPS)")
 emit(p,"all_sector_eps")
+
+# quarter-over-quarter
+ptitle <- paste("S&P Indices","Reported Earnings QOQ","Sector Data",plot_date,sep=' - ')
+p <- ggplot(spsec %>% filter(year(Date)>2009) %>% na.omit,aes(x=Date,y=QOQ,color=Sector)) +
+  geom_line() +
+  scale_y_continuous(labels=percent_format(),breaks=pretty_breaks()) +
+  facet_grid(Index~.,scales="free_y",as.table=FALSE) +
+  geom_hline(yintercept=0,color="gray",linetype="dashed") +
+  ggtitle(ptitle) +
+  xlab(NULL) + ylab("Quarterly Earnings per Share Change Q-O-Q (%)")
+emit(p,"all_sector_eps_qoq")
+
+# reported by sector and index
+for ( s in unique(spsec$Sector) ) {
+  ptitle <- paste("S&P Indices","Reported Earnings",s,plot_date,sep=' - ')
+  p <- ggplot(spsec %>% filter(Sector %in% s) %>% filter(year(Date)>2009) %>% na.omit,aes(x=Date,y=Value,color=Index)) +
+    geom_line() +
+    scale_y_continuous(labels=dollar_format(),breaks=pretty_breaks()) +
+    ggtitle(ptitle) +
+    xlab(NULL) + ylab("Quarterly Earnings per Share (EPS)")
+  sp <- str_to_lower(gsub(' ','_',s,fixed=TRUE))
+  emit(p,paste("sector_eps",sp,sep='_'))
+}
+
 
 # < end >
